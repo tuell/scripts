@@ -21,7 +21,7 @@ total_no <- read_html(firstpage) %>%
     as.integer() 
 
 # sequence in steps of 20 up to total no. (pages are 20 entries long by default)    
-pages = seq(20,total_no, 20)
+pages <- seq(20,total_no, 20)
 
 # construct urls from sequence
 urls <- pages %>%
@@ -76,6 +76,10 @@ scrape_page <- function(url){
         str_replace("\\d{4,5}", "") %>%
         str_trim()
     
+    web = html_node(row, "td:nth-child(2)") %>%
+        html_node("a") %>%
+        html_attr("href")
+    
     # status of beds is displayed via colored "span"-elements with specific class names
 
     # icu low care: 4th cell in row
@@ -102,6 +106,7 @@ scrape_page <- function(url){
 
     # combine all results in one tibble    
     return_tbl = tibble(name = name,
+                        web = web,
                         state = state,
                         street = street,
                         plz = plz,
