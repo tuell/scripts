@@ -2,8 +2,23 @@
 #       Load required packages             #
 #------------------------------------------#
 
-library(tidyverse)
-library(rvest)
+require(tidyverse)
+require(lubridate)
+require(rvest)
+require(googlesheets4) # install dev version via github, otherwise writing sheets not available
+
+# for instant geocoding - not used currently
+# require(tidygeocoder)
+
+#------------------------------------------#
+#       Connect to Google Sheet            #
+#------------------------------------------#
+
+# Authenticate via Googlesheets-Api-Key
+sheets_deauth() # delete previous auth
+sheets_auth(email="EMAIL",path="/path/to/key.json")
+
+sheet_id <- "GOOGLE-SHEET-ID"
 
 
 #------------------------------------------#
@@ -34,6 +49,10 @@ urls <- append(c(firstpage), urls)
 #      function to scrape each url         #
 #------------------------------------------#
 
+# helper functoin for time stamps 
+ts <- stamp("2020-01-31 15:55")
+
+# scraping function
 scrape_page <- function(url){
 
     # extract table containing hospitals
@@ -56,20 +75,17 @@ scrape_page <- function(url){
     # date and time: seventh cell in row, split up via regex
     date = html_node(row, "td:nth-child(7)") %>% html_text() %>% str_trim() %>% str_replace(regex("(20\\d\\d).*", dotall = T), "\\1")
     time = html_node(row, "td:nth-child(7)") %>% html_text() %>% str_trim() %>% str_extract("\\d\\d\\:\\d\\d")
-
+    
+    date_time = str_c(date, " ", time)
+    
+    timestamp = ts(dmy_hm(date_time))
+    
     # street: first cell in row, second-to-last "small"-tag
     street = html_node(row, "td:nth-child(1)") %>%
         html_node("small:nth-last-of-type(2)") %>%
         html_text() %>%
         str_trim()
 
-    # location (plz and placename): first cell in row, last "small"-tag
-    plz = html_node(row, "td:nth-child(1)") %>%
-        html_node("small:last-of-type") %>%
-        html_text() %>%
-        str_trim() %>%
-        str_extract("\\d{4,5}")
-    
     loc = html_node(row, "td:nth-child(1)") %>%
         html_node("small:last-of-type") %>%
         html_text() %>%
@@ -108,11 +124,8 @@ scrape_page <- function(url){
     return_tbl = tibble(name = name,
                         web = web,
                         state = state,
-                        street = street,
-                        plz = plz,
-                        location = loc,
-                        date = date,
-                        time = time,
+                        adress = str_c(street, ", ", loc),
+                        timestamp = timestamp,
                         icu_low = icu_low,
                         icu_high = icu_high,
                         ecmo = ecmo)
@@ -127,10 +140,63 @@ scrape_page <- function(url){
 #------------------------------------------#
 
 # use lapply to create list of tibbles for each url, then bind together in one big tbl
-full_tbl <- lapply(urls, scrape_page) %>% bind_rows
+new_tbl <- lapply(urls, scrape_page) %>% bind_rows
+
 
 #------------------------------------------#
-#            save as csv file              #
+#       add geo location data              #
 #------------------------------------------#
 
-write.csv(full_tbl, format(Sys.time(), "divi_%Y%m%d_%H%M.csv"), fileEncoding = "UTF-8", row.names = F)
+# load adress file
+adresses <- read_sheet(sheet_id, sheet="adresses")
+
+# select only lat and long for merging
+join_adresses <- adresses %>%
+    select(-adress)
+
+new_tbl <- left_join(new_tbl, join_adresses, by = "name")
+
+# possibly geocode missing adresses right here. 
+# Not used currently because of trouble installing tidygeocoder package on server
+
+# # merge result tibble with lat long into temporary tibble
+# temp_tbl <- left_join(new_tbl, join_adresses, by = "name")
+# 
+# # in case of new hospitals in list:
+# # find hospitals missing latlong and then geocode adress
+# missing_adresses <- temp_tbl %>%
+#     filter(is.na(lat)) %>%
+#     select(name, adress) %>%
+#     tidygeocoder::geocode(adress, method = "osm")
+# 
+# # if there were any missing adresses: append them to adress-list and overwrite csv file
+# # then perform new join with complete adress tbl
+# # else use temp join tbl as full tibble
+# if(nrow(missing_adresses) > 0){
+#     adresses <- bind_rows(adresses, missing_adresses) %>% distinct()
+#     write_sheet(adresses, ss=sheet_id, sheet="adresses")
+#     join_adresses <- adresses %>% select(-adress)
+#     new_tbl <- left_join(full_tbl, join_adresses, by = "name")
+# } else {
+#     full_tbl <- temp_tbl
+# }
+
+
+#------------------------------------------#
+#               save data                  #
+#------------------------------------------#
+
+# save locally to csv
+write.csv(new_tbl, format(Sys.time(), "/home/till_hafermann_hr_de/rscripts/divi/divi_%Y%m%d_%H%M.csv"), fileEncoding = "UTF-8", row.names = F)
+
+
+# write and append to google sheet
+
+sheet_tbl <- new_tbl %>%
+    mutate(scraped = ts(now(tzone = "CET")))
+
+
+write_sheet(sheet_tbl, ss = sheet_id, sheet = "current")
+sheets_append(sheet_tbl, ss=sheet_id, sheet = "archive")
+
+
