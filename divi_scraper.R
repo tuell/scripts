@@ -187,7 +187,7 @@ new_tbl <- left_join(new_tbl, join_adresses, by = "name")
 #------------------------------------------#
 
 # save locally to csv
-write.csv(new_tbl, format(Sys.time(), "/home/till_hafermann_hr_de/rscripts/divi/divi_%Y%m%d_%H%M.csv"), fileEncoding = "UTF-8", row.names = F)
+write.csv(new_tbl, format(Sys.time(), "/path/to/folder/divi_%Y%m%d_%H%M.csv"), fileEncoding = "UTF-8", row.names = F)
 
 
 # write and append to google sheet
